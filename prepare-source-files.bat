@@ -1,0 +1,1 @@
+php .\tools\texture-converter\converter.php %cd%\resources\raw %cd%\resources\sprites %cd%\resources\sprites\map.json

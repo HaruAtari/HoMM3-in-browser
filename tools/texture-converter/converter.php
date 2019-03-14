@@ -20,7 +20,7 @@ if (count($argv) != 4) {
 
 $sourceDirectory = realpath($argv[1]);
 $resultDirectory = realpath($argv[2]);
-$outputFile = realpath(dirname($argv[3])) . '/' . substr($argv[3], strrpos($argv[3], '/'));
+
 if (!is_dir($sourceDirectory)) {
     echo "Source directory '{$sourceDirectory} does not exist.\n";
     return 1;
@@ -29,9 +29,10 @@ if (!is_dir($resultDirectory)) {
     echo "Result directory '{$resultDirectory} does not exist.\n";
     return 1;
 }
+$outputFile=$argv[3];
 
 $logger = new Logger();
-$result = (new TextureConverter($logger))->processDirectory($sourceDirectory, $resultDirectory);
+$result = (new TextureConverter($logger))->processDirectoriesTree($sourceDirectory, $resultDirectory);
 if ($outputFile) {
     file_put_contents($outputFile, json_encode($result));
 } else {
@@ -39,7 +40,6 @@ if ($outputFile) {
     echo json_encode($result);
 }
 return 0;
-
 
 class TextureConverter
 {
@@ -56,10 +56,15 @@ class TextureConverter
     public $shadowDirName = 'Shadow';
     public $skippedColors = [
         [0, 255, 255],
+        [0, 254, 255],
+        [255, 50, 255],
+        [255, 100, 255],
     ];
     public $replacedColors = [
         [[255, 0, 255], [0, 0, 0, self::SHADOW_TRANSPARENT]],
-        [[255, 150, 255], [100, 100, 100, self::SHADOW_TRANSPARENT]],
+        [[255, 50, 255], [50, 50, 50, self::SHADOW_TRANSPARENT]],
+        [[255, 100, 255], [100, 100, 100, self::SHADOW_TRANSPARENT]],
+        [[255, 150, 255], [150, 150, 150, self::SHADOW_TRANSPARENT]],
     ];
     public $typeNames = [
         self::TYPE_SPELL => 'spell',
@@ -126,27 +131,48 @@ class TextureConverter
     }
 
     /**
-     * @param string $sourceDir
+     * @param string $sourceRootDir
      * @param string $resultDir
-     * @param Logger
      * @return array
      */
-    public function processDirectory($sourceDir, $resultDir)
+    public function processDirectoriesTree($sourceRootDir, $resultDir)
+    {
+        $result = [];
+        foreach (scandir($sourceRootDir) as $subdir) {
+            if (in_array($subdir, ['.', '..'])) {
+                continue;
+            }
+            if(!is_dir("{$sourceRootDir}/{$subdir}")){
+                continue;
+            }
+            $this->logger->log("Parse {$subdir} directory");
+            $dirResult = $this->processDirectory("{$sourceRootDir}/{$subdir}", $resultDir);
+            $result = array_merge($result, $dirResult);
+        }
+        $this->logger->log("Result files are placing in {$resultDir}");
+        return $result;
+    }
+
+    /**
+     * @param string $sourceDir
+     * @param string $resultDir
+     * @return array
+     */
+    private function processDirectory($sourceDir, $resultDir)
     {
         $result = [];
         $files = $this->getHdlFiles($sourceDir);
         $filesCount = count($files);
-        $this->logger->log(0, "Files for processing: {$filesCount}");
+        $this->logger->log("Files for processing: {$filesCount}");
         foreach ($files as $i => $fileName) {
+            $i++;
             $sourceFile = "{$sourceDir}/{$fileName}";
             $essenceName = str_replace('.hdl', '', $fileName);
             $resultFileName = "{$essenceName}.png";
             $essenceData = $this->processEssence($sourceFile, $resultDir, $resultFileName);
             $result[$essenceName] = $essenceData;
-            $this->logger->log(($i % 10 == 0) ? 0 : 1, "{$i} of {$filesCount} were processed", 1);
+            $this->logger->log("[{$i} of {$filesCount}] {$essenceName} was processed", 1);
         }
-        $this->logger->log(0, "{$filesCount} files were processed");
-        $this->logger->log(0, "There are placing in {$resultDir}");
         return $result;
     }
 
@@ -412,18 +438,12 @@ class TextureConverter
 
 class Logger
 {
-    public $maxLevel = 10;
-
     /**
-     * @param int $level
      * @param string $message
      * @param int $indent
      */
-    public function log($level, $message, $indent = 0)
+    public function log($message, $indent = 0)
     {
-        if ($level > $this->maxLevel) {
-            return;
-        }
         echo str_repeat('  ', $indent);
         echo $message;
         echo "\n";
