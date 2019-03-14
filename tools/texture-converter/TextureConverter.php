@@ -10,10 +10,7 @@
 
 $sourceDirectory = realpath($argv[1]);
 $resultDirectory = realpath($argv[2]);
-$outputFile = null;
-if (isset($argv[3])) {
-    $outputFile = realpath(dirname($argv[3])) . '/' . substr($argv[3], strrpos($argv[3], '/'));
-}
+$outputFile = realpath(dirname($argv[3])) . '/' . substr($argv[3], strrpos($argv[3], '/'));
 if (!is_dir($sourceDirectory)) {
     echo "Source directory '{$sourceDirectory} does not exist.\n";
     return 1;
@@ -22,14 +19,14 @@ if (!is_dir($resultDirectory)) {
     echo "Result directory '{$resultDirectory} does not exist.\n";
     return 1;
 }
-if ($outputFile && file_exists($outputFile)) {
-    echo "Output file '{$outputFile} already exists.\n";
-    return 1;
-}
-$result = (new TextureConverter())->processDirectory($sourceDirectory, $resultDirectory);
+
+$logger = new Logger();
+$logger->maxLevel = 0;
+$result = (new TextureConverter($logger))->processDirectory($sourceDirectory, $resultDirectory);
 if ($outputFile) {
     file_put_contents($outputFile, json_encode($result));
 } else {
+    echo "\n";
     echo json_encode($result);
 }
 return 0;
@@ -51,8 +48,8 @@ class TextureConverter
         [0, 255, 255],
     ];
     public $replacedColors = [
-        [[255, 0, 255], [0, 0, 0, 75]],
-        [[255, 150, 255], [100, 100, 100, 75]],
+        [[255, 0, 255], [0, 0, 0, 50]],
+        [[255, 150, 255], [100, 100, 100, 50]],
     ];
     public $typeNames = [
         self::TYPE_SPELL => 'spell',
@@ -107,22 +104,39 @@ class TextureConverter
             'cast-spell',
         ],
     ];
+    /** @var Logger */
+    private $logger;
+
+    /**
+     * @param Logger $logger
+     */
+    public function __construct($logger)
+    {
+        $this->logger = $logger;
+    }
 
     /**
      * @param string $sourceDir
      * @param string $resultDir
+     * @param Logger
      * @return array
      */
     public function processDirectory($sourceDir, $resultDir)
     {
         $result = [];
-        foreach ($this->getHdlFiles($sourceDir) as $fileName) {
+        $files = $this->getHdlFiles($sourceDir);
+        $filesCount = count($files);
+        $this->logger->log(0, "Files for processing: {$filesCount}");
+        foreach ($files as $i => $fileName) {
             $sourceFile = "{$sourceDir}/{$fileName}";
             $essenceName = str_replace('.hdl', '', $fileName);
             $resultFileName = "{$essenceName}.png";
             $essenceData = $this->processEssence($sourceFile, $resultDir, $resultFileName);
             $result[$essenceName] = $essenceData;
+            $this->logger->log(($i % 10 == 0) ? 0 : 1, "{$i} of {$filesCount} were processed", 1);
         }
+        $this->logger->log(0, "{$filesCount} files were processed");
+        $this->logger->log(0, "There are placing in {$resultDir}");
         return $result;
     }
 
@@ -153,7 +167,7 @@ class TextureConverter
      *   'height' => int $frameHeight,
      *   'path' => string $relativeFilePath
      *   'groups' => [
-     *     int $groupName => int[] $frameOffsets
+     *     int[] $frameOffsets
      *   ]
      * ]
      */
@@ -174,7 +188,6 @@ class TextureConverter
      * @param string $filePath
      * @return array [
      *   'type' => string $typeName,
-     *   'withShadow' => bool $withShadow,
      *   'groups' => [
      *     string $groupName => [
      *       ['file' => string $fileName, 'framesCount' => int $framesCount]
@@ -186,13 +199,8 @@ class TextureConverter
     {
         $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         $result = ['groups' => []];
-        $withShadow = true;
         $type = null;
         foreach ($lines as $line) {
-            if ($line == 'Shadow Type=0') {
-                $withShadow = false;
-                continue;
-            }
             if (preg_match('/^Type=(\d+)/', $line, $matches)) {
                 $type = $matches[1];
                 continue;
@@ -214,7 +222,6 @@ class TextureConverter
                 $result['groups'][$groupName] = $frames;
             }
         }
-        $result['withShadow'] = $withShadow;
         $result['type'] = $this->typeNames[$type];
         return $result;
     }
@@ -235,7 +242,7 @@ class TextureConverter
         foreach ($scheme['groups'] as $groupNumber => $images) {
             foreach ($images as $imageData) {
                 $sourceFilePath = "{$rootDir}/{$imageData['file']}";
-                $shadowFilePath = $scheme['withShadow'] ? "{$rootDir}/{$this->shadowDirName}/{$imageData['file']}" : null;
+                $shadowFilePath = "{$rootDir}/{$this->shadowDirName}/{$imageData['file']}";
                 $imageResources[$imageData['file']] = $this->processImage($sourceFilePath, $shadowFilePath);
             }
         }
@@ -257,7 +264,7 @@ class TextureConverter
         $newImage = imagecreate($width, $height);
         imagecolorallocatealpha($newImage, 0, 0, 0, 127);
         $newImage = $this->copyImage($sourceImage, $newImage, $width, $height);
-        if ($shadowFilePath) {
+        if ($shadowFilePath && file_exists($shadowFilePath)) {
             $shadowImage = imagecreatefrombmp($shadowFilePath);
             $newImage = $this->copyShadow($shadowImage, $newImage, $width, $height);
         }
@@ -330,7 +337,7 @@ class TextureConverter
      * @return array [
      *   'frameWidth' => int $frameWidth,
      *   'frameHeight' => int $frameHeight
-     *   'offsets' => array [string $imageName => int $verticalOffset],
+     *   'offsets' => array [string $imageName => int[] $offset],
      *   'image' => resource $image
      * ]
      */
@@ -344,15 +351,17 @@ class TextureConverter
             'frameHeight' => $frameHeight,
             'offsets' => [],
         ];
+        $totalWidth = $frameWidth;
         $totalHeight = count($images) * $frameHeight;
-        $resultImage = imagecreate($frameWidth, $totalHeight);
+        $resultImage = imagecreate($totalWidth, $totalHeight);
         imagecolorallocatealpha($resultImage, 0, 0, 0, 127);
 
         $i = 0;
         foreach ($images as $name => $image) {
-            $offset = $i * $frameHeight;
-            imagecopy($resultImage, $image, 0, $offset, 0, 0, $frameWidth, $frameHeight);
-            $result['offsets'][$name] = $offset;
+            $offsetX = 0;
+            $offsetY = $i * $frameHeight;
+            imagecopy($resultImage, $image, $offsetX, $offsetY, 0, 0, $frameWidth, $frameHeight);
+            $result['offsets'][$name] = [$offsetX, $offsetY];
             $i++;
         }
         $result['image'] = $resultImage;
@@ -387,5 +396,25 @@ class TextureConverter
             }
         }
         return $result;
+    }
+}
+
+class Logger
+{
+    public $maxLevel = 10;
+
+    /**
+     * @param int $level
+     * @param string $message
+     * @param int $indent
+     */
+    public function log($level, $message, $indent = 0)
+    {
+        if ($level > $this->maxLevel) {
+            return;
+        }
+        echo str_repeat('  ', $indent);
+        echo $message;
+        echo "\n";
     }
 }
