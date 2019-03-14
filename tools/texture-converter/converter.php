@@ -7,6 +7,16 @@
  * php ./TextureConverter.php <directoryWithSourceFiles> <directoryWithResults> [<outputDataFile>]
  * ```
  */
+if (count($argv) != 4) {
+    echo "Incorrect arguments! Command has a next signature:\n";
+    echo "\n";
+    echo "  php ./converter.php <directoryWithSourceFiles> <directoryWithResults> <outputDataFile>\n";
+    echo "\n";
+    echo "  * <directoryWithSourceFiles> - Path to directory with source images and .hdl files.\n";
+    echo "  * <directoryWithResults> - Path to directory for result images.\n";
+    echo "  * <outputDataFile> - The .json file for result sprites metadata.\n";
+    return 1;
+}
 
 $sourceDirectory = realpath($argv[1]);
 $resultDirectory = realpath($argv[2]);
@@ -21,7 +31,6 @@ if (!is_dir($resultDirectory)) {
 }
 
 $logger = new Logger();
-$logger->maxLevel = 0;
 $result = (new TextureConverter($logger))->processDirectory($sourceDirectory, $resultDirectory);
 if ($outputFile) {
     file_put_contents($outputFile, json_encode($result));
@@ -43,13 +52,14 @@ class TextureConverter
     const TYPE_INTERFACE = 7;
     const TYPE_COMBAT_HERO = 9;
 
+    const SHADOW_TRANSPARENT = 75;
     public $shadowDirName = 'Shadow';
     public $skippedColors = [
         [0, 255, 255],
     ];
     public $replacedColors = [
-        [[255, 0, 255], [0, 0, 0, 50]],
-        [[255, 150, 255], [100, 100, 100, 50]],
+        [[255, 0, 255], [0, 0, 0, self::SHADOW_TRANSPARENT]],
+        [[255, 150, 255], [100, 100, 100, self::SHADOW_TRANSPARENT]],
     ];
     public $typeNames = [
         self::TYPE_SPELL => 'spell',
@@ -264,6 +274,7 @@ class TextureConverter
         $newImage = imagecreate($width, $height);
         imagecolorallocatealpha($newImage, 0, 0, 0, 127);
         $newImage = $this->copyImage($sourceImage, $newImage, $width, $height);
+        $newImage = $this->copyShadow($sourceImage, $newImage, $width, $height);
         if ($shadowFilePath && file_exists($shadowFilePath)) {
             $shadowImage = imagecreatefrombmp($shadowFilePath);
             $newImage = $this->copyShadow($shadowImage, $newImage, $width, $height);
