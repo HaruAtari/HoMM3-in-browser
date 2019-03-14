@@ -29,7 +29,7 @@ if (!is_dir($resultDirectory)) {
     echo "Result directory '{$resultDirectory} does not exist.\n";
     return 1;
 }
-$outputFile=$argv[3];
+$outputFile = $argv[3];
 
 $logger = new Logger();
 $result = (new TextureConverter($logger))->processDirectoriesTree($sourceDirectory, $resultDirectory);
@@ -142,7 +142,7 @@ class TextureConverter
             if (in_array($subdir, ['.', '..'])) {
                 continue;
             }
-            if(!is_dir("{$sourceRootDir}/{$subdir}")){
+            if (!is_dir("{$sourceRootDir}/{$subdir}")) {
                 continue;
             }
             $this->logger->log("Parse {$subdir} directory");
@@ -380,29 +380,72 @@ class TextureConverter
      */
     private function unionImages($images)
     {
-        $firstImage = reset($images);
-        $frameWidth = imagesx($firstImage);
-        $frameHeight = imagesy($firstImage);
+        list($frameWidth,
+            $frameHeight,
+            $totalWidth,
+            $totalHeight,
+            $widthCount,
+            $heightCount
+            ) = $this->countUnionImageSize($images);
+
+        $resultImage = imagecreate($totalWidth, $totalHeight);
+        imagecolorallocatealpha($resultImage, 0, 0, 0, 127);
         $result = [
             'frameWidth' => $frameWidth,
             'frameHeight' => $frameHeight,
             'offsets' => [],
         ];
-        $totalWidth = $frameWidth;
-        $totalHeight = count($images) * $frameHeight;
-        $resultImage = imagecreate($totalWidth, $totalHeight);
-        imagecolorallocatealpha($resultImage, 0, 0, 0, 127);
 
         $i = 0;
+        $j = 0;
         foreach ($images as $name => $image) {
-            $offsetX = 0;
-            $offsetY = $i * $frameHeight;
+            if ($j == $heightCount) {
+                $i++;
+                $j = 0;
+            }
+            $offsetX = $frameWidth * $i;
+            $offsetY = $frameHeight * $j;
             imagecopy($resultImage, $image, $offsetX, $offsetY, 0, 0, $frameWidth, $frameHeight);
             $result['offsets'][$name] = [$offsetX, $offsetY];
-            $i++;
+            $j++;
         }
         $result['image'] = $resultImage;
         return $result;
+    }
+
+    /**
+     * @param array $images Source images
+     * @return array [
+     *     int $frameWidth,
+     *     int $frameHeight,
+     *     int $totalWidth,
+     *     int $totalHeight,
+     *     int $widthCount,
+     *     int $heightCount
+     * ]
+     */
+    private function countUnionImageSize($images)
+    {
+        $imagesCount = count($images);
+        $firstImage = reset($images);
+
+        $frameWidth = imagesx($firstImage);
+        $frameHeight = imagesy($firstImage);
+
+        $widthCount = floor(sqrt($imagesCount));
+        $heightCount = ceil($imagesCount / $widthCount);
+
+        $totalWidth = $widthCount * $frameWidth;
+        $totalHeight = $heightCount * $frameHeight;
+
+        return [
+            $frameWidth,
+            $frameHeight,
+            $totalWidth,
+            $totalHeight,
+            $widthCount,
+            $heightCount,
+        ];
     }
 
     /**
