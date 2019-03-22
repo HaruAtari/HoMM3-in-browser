@@ -1,0 +1,8 @@
+{
+  "pythonCommand": "C:\\Python27\\python.exe",
+  "sourceDir": "./../../resources/Data",
+  "tempDir": "./../../resources/_TEMP",
+  "resultDir": "./../../resources/result",
+  "spriteDataFilename": "map.json",
+  "onlyLodFiles": []
+}
